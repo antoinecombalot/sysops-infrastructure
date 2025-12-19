@@ -1,0 +1,107 @@
+---
+- name: "V1 - Installation automatisée de Docker"
+  hosts: sysops
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: "🧹 Suppression des anciennes versions de Docker"
+      package:
+        name:
+          - docker
+          - docker-engine
+          - docker.io
+          - containerd
+          - runc
+        state: absent
+      ignore_errors: yes
+
+    - name: "📦 Installation des paquets système requis"
+      apt:
+        name: "{{ system_packages }}"
+        state: present
+        update_cache: yes
+
+    - name: "🔐 Ajout de la clé GPG Docker"
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: "📋 Ajout du dépôt Docker"
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable"
+        state: present
+        update_cache: yes
+
+    - name: "🐳 Installation de Docker CE"
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
+
+    - name: "🚀 Démarrage et activation de Docker"
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: "👥 Ajout de l'utilisateur au groupe docker"
+      user:
+        name: "{{ item }}"
+        groups: docker
+        append: yes
+      loop: "{{ docker_users }}"
+
+    - name: "📁 Création des dossiers de travail"
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+      loop: "{{ work_directories }}"
+
+    - name: "⬇️ Installation Docker Compose standalone"
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-linux-x86_64"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: "🔍 Vérification de l'installation Docker"
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: "🔍 Vérification de Docker Compose (plugin)"
+      command: docker compose version
+      register: docker_compose_plugin_version
+      changed_when: false
+
+    - name: "🔍 Vérification de Docker Compose (standalone)"
+      command: docker-compose --version
+      register: docker_compose_standalone_version
+      changed_when: false
+
+    - name: "✅ Affichage des versions installées"
+      debug:
+        msg:
+          - "Docker: {{ docker_version.stdout }}"
+          - "Docker Compose Plugin: {{ docker_compose_plugin_version.stdout }}"
+          - "Docker Compose Standalone: {{ docker_compose_standalone_version.stdout }}"
+
+    - name: "🧪 Test Docker avec Hello World"
+      command: docker run --rm hello-world
+      register: hello_world_output
+      changed_when: false
+
+    - name: "🎉 Succès du test Docker"
+      debug:
+        msg: "✅ Docker fonctionne correctement !"
+      when: "'Hello from Docker!' in hello_world_output.stdout"
