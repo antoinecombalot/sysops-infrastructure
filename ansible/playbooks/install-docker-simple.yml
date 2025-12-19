@@ -1,0 +1,78 @@
+---
+- name: "V1 - Installation Docker (version ultra-simple)"
+  hosts: sysops
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    docker_compose_version: "v2.24.1"
+    work_directories:
+      - /opt/applications
+      - /opt/data
+      - /opt/logs
+
+  tasks:
+    - name: "🧹 Suppression des anciennes versions de Docker"
+      package:
+        name:
+          - docker
+          - docker-engine
+          - docker.io
+          - containerd
+          - runc
+        state: absent
+      ignore_errors: yes
+
+    - name: "🐳 Installation Docker via script officiel"
+      shell: |
+        curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+        sh /tmp/get-docker.sh
+        rm /tmp/get-docker.sh
+      args:
+        creates: /usr/bin/docker
+
+    - name: "🚀 Démarrage et activation de Docker"
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: "👥 Ajout de root au groupe docker"
+      user:
+        name: root
+        groups: docker
+        append: yes
+
+    - name: "📁 Création des dossiers de travail"
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop: "{{ work_directories }}"
+
+    - name: "⬇️ Installation Docker Compose"
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-linux-x86_64"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: "🔍 Test installation"
+      command: "{{ item }}"
+      register: version_check
+      changed_when: false
+      loop:
+        - docker --version
+        - docker-compose --version
+      
+    - name: "✅ Versions installées"
+      debug:
+        msg: "{{ version_check.results | map(attribute='stdout') | list }}"
+
+    - name: "🧪 Test Hello World"
+      command: docker run --rm hello-world
+      register: hello_test
+      changed_when: false
+
+    - name: "🎉 Installation réussie"
+      debug:
+        msg: "✅ Docker est opérationnel !"

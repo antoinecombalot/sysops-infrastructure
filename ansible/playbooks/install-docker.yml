@@ -3,8 +3,31 @@
   hosts: sysops
   become: yes
   gather_facts: yes
+  
+  vars:
+    docker_compose_version: "v2.24.1"
+    system_packages:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    work_directories:
+      - /opt/applications
+      - /opt/data
+      - /opt/logs
 
   tasks:
+    - name: "🔍 Détection de l'utilisateur actuel"
+      command: whoami
+      register: current_user
+      changed_when: false
+      become: no
+
+    - name: "📝 Définition de la variable utilisateur"
+      set_fact:
+        target_user: "{{ current_user.stdout }}"
+
     - name: "🧹 Suppression des anciennes versions de Docker"
       package:
         name:
@@ -22,14 +45,31 @@
         state: present
         update_cache: yes
 
-    - name: "🔐 Ajout de la clé GPG Docker"
-      apt_key:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        state: present
+    - name: "📁 Création du dossier pour les clés GPG"
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
 
-    - name: "📋 Ajout du dépôt Docker"
+    - name: "🔐 Téléchargement de la clé GPG Docker (méthode moderne)"
+      get_url:
+        url: https://download.docker.com/linux/debian/gpg
+        dest: /tmp/docker.gpg
+        mode: '0644'
+
+    - name: "🔑 Installation de la clé GPG Docker"
+      command: gpg --dearmor -o /etc/apt/keyrings/docker.gpg /tmp/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
+
+    - name: "🔧 Définition des permissions de la clé"
+      file:
+        path: /etc/apt/keyrings/docker.gpg
+        mode: '0644'
+
+    - name: "📋 Ajout du dépôt Docker pour Debian (méthode moderne)"
       apt_repository:
-        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable"
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian {{ ansible_lsb.codename }} stable"
         state: present
         update_cache: yes
 
@@ -52,18 +92,17 @@
 
     - name: "👥 Ajout de l'utilisateur au groupe docker"
       user:
-        name: "{{ item }}"
+        name: "{{ target_user }}"
         groups: docker
         append: yes
-      loop: "{{ docker_users }}"
 
     - name: "📁 Création des dossiers de travail"
       file:
         path: "{{ item }}"
         state: directory
         mode: '0755'
-        owner: "{{ ansible_user }}"
-        group: "{{ ansible_user }}"
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
       loop: "{{ work_directories }}"
 
     - name: "⬇️ Installation Docker Compose standalone"
@@ -73,6 +112,11 @@
         mode: '0755'
         owner: root
         group: root
+
+    - name: "🧹 Nettoyage du fichier GPG temporaire"
+      file:
+        path: /tmp/docker.gpg
+        state: absent
 
     - name: "🔍 Vérification de l'installation Docker"
       command: docker --version
@@ -89,9 +133,10 @@
       register: docker_compose_standalone_version
       changed_when: false
 
-    - name: "✅ Affichage des versions installées"
+    - name: "✅ Affichage des informations d'installation"
       debug:
         msg:
+          - "Utilisateur configuré: {{ target_user }}"
           - "Docker: {{ docker_version.stdout }}"
           - "Docker Compose Plugin: {{ docker_compose_plugin_version.stdout }}"
           - "Docker Compose Standalone: {{ docker_compose_standalone_version.stdout }}"
@@ -103,5 +148,7 @@
 
     - name: "🎉 Succès du test Docker"
       debug:
-        msg: "✅ Docker fonctionne correctement !"
+        msg: 
+          - "✅ Docker fonctionne correctement !"
+          - "Utilisateur {{ target_user }} ajouté au groupe docker"
       when: "'Hello from Docker!' in hello_world_output.stdout"
